@@ -3,31 +3,19 @@ package inspection
 import "example.com/apiary-colony-service/internal/domain"
 
 const (
-	ConcernMiteLoad    = "mite_load"
-	ConcernBroodGap    = "brood_gap"
-	ConcernTemperRisk  = "temper_risk"
-	ConcernLowStrength = "low_strength"
+	ConcernMiteLoad    = domain.ConcernMiteLoad
+	ConcernBroodGap    = domain.ConcernBroodGap
+	ConcernTemperRisk  = domain.ConcernTemperRisk
+	ConcernLowStrength = domain.ConcernLowStrength
 )
 
 const (
-	MiteLoadThreshold  = 9
-	LowStrengthCeiling = 2
+	MiteLoadThreshold  = domain.DefaultMiteLoadThreshold
+	LowStrengthCeiling = domain.DefaultLowStrengthCeiling
 )
 
-// DeriveConcerns 按固定阈值从一次巡检派生出关注项，顺序稳定。
+// DeriveConcerns 按默认门槛从一次巡检派生关注项，顺序稳定。
+// 服务流程会改用具片区覆盖门槛的 domain.DeriveConcerns。
 func DeriveConcerns(record domain.Inspection) []string {
-	concerns := make([]string, 0, 4)
-	if record.MiteCount >= MiteLoadThreshold {
-		concerns = append(concerns, ConcernMiteLoad)
-	}
-	if record.BroodPattern == domain.BroodNone {
-		concerns = append(concerns, ConcernBroodGap)
-	}
-	if record.Temper == domain.TemperAggressive {
-		concerns = append(concerns, ConcernTemperRisk)
-	}
-	if record.ColonyStrength <= LowStrengthCeiling {
-		concerns = append(concerns, ConcernLowStrength)
-	}
-	return concerns
+	return domain.DeriveConcerns(record, domain.DefaultConcernThresholds())
 }

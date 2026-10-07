@@ -18,6 +18,14 @@ const (
 	TemperAggressive Temper = "aggressive"
 )
 
+// 关注项编号由关注项派生规则固定，巡检保存时随记录一起固化。
+const (
+	ConcernMiteLoad    = "mite_load"
+	ConcernBroodGap    = "brood_gap"
+	ConcernTemperRisk  = "temper_risk"
+	ConcernLowStrength = "low_strength"
+)
+
 // Inspection 是一次现场巡检的固化结果，关注项由量测派生。
 type Inspection struct {
 	ID             string       `json:"id"`

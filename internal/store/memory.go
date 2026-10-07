@@ -18,16 +18,21 @@ type Memory struct {
 	inspections map[string][]domain.Inspection
 	queens      map[string][]domain.Queen
 
+	// districtThresholds 保存协调人为各片区设定的关注项门槛覆盖；
+	// 未出现在映射中的片区使用默认门槛。
+	districtThresholds map[string]domain.DistrictThresholds
+
 	inspectionSeq int
 	queenSeq      int
 }
 
 func NewMemory() *Memory {
 	return &Memory{
-		apiaries:    make(map[string]domain.Apiary),
-		hives:       make(map[string]domain.Hive),
-		inspections: make(map[string][]domain.Inspection),
-		queens:      make(map[string][]domain.Queen),
+		apiaries:           make(map[string]domain.Apiary),
+		hives:              make(map[string]domain.Hive),
+		inspections:        make(map[string][]domain.Inspection),
+		queens:             make(map[string][]domain.Queen),
+		districtThresholds: make(map[string]domain.DistrictThresholds),
 	}
 }
 
@@ -66,6 +71,53 @@ func (m *Memory) GetHive(id string) (domain.Hive, bool) {
 	defer m.mu.RUnlock()
 	hive, ok := m.hives[id]
 	return hive, ok
+}
+
+// PutDistrictThresholds 保存片区门槛覆盖。片区是否存在由调用方先校验；
+// 已通过领域校验的门槛一定合法，因此读取时可以直接使用。
+func (m *Memory) PutDistrictThresholds(entry domain.DistrictThresholds) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.districtThresholds[entry.District] = entry
+}
+
+// GetDistrictThresholds 返回片区已经设定的门槛覆盖；未设定时 ok 为 false。
+func (m *Memory) GetDistrictThresholds(district string) (domain.DistrictThresholds, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, ok := m.districtThresholds[district]
+	return entry, ok
+}
+
+// DistrictExists 判断是否已有蜂场登记在该片区，避免协调人为打错名字的片区设定门槛。
+func (m *Memory) DistrictExists(district string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, apiary := range m.apiaries {
+		if apiary.District == district {
+			return true
+		}
+	}
+	return false
+}
+
+// ThresholdsForHive 沿 蜂箱 -> 蜂场 -> 片区 解析该蜂箱所在片区生效的关注项门槛。
+// 片区有覆盖时返回覆盖门槛且 overridden 为 true，否则返回默认门槛。
+func (m *Memory) ThresholdsForHive(hiveID string) (domain.ConcernThresholds, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	hive, ok := m.hives[hiveID]
+	if !ok {
+		return domain.ConcernThresholds{}, false, domain.NotFound("蜂箱", hiveID)
+	}
+	apiary, ok := m.apiaries[hive.ApiaryID]
+	if !ok {
+		return domain.ConcernThresholds{}, false, domain.Storage("蜂箱 %q 所属蜂场 %q 记录缺失", hiveID, hive.ApiaryID)
+	}
+	if entry, ok := m.districtThresholds[apiary.District]; ok {
+		return entry.Thresholds, true, nil
+	}
+	return domain.DefaultConcernThresholds(), false, nil
 }
 
 // AdvanceHive 在同一把写锁内完成状态读取、迁移校验与写入，避免并发迁移产生交错结果。

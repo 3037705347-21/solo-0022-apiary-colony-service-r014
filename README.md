@@ -54,6 +54,11 @@ go run ./cmd/check -workflow read-apiary-status
 - `GET /hives/{hiveId}/queens`：列出蜂王记录。
 - `GET /apiaries/{apiaryId}/status`：可选查询参数 `asOf`（RFC3339），返回状态计数、
   待巡检蜂箱、有未处理关注项的蜂箱与逐蜂箱摘要。
+- `PUT /districts/{district}/concern-thresholds`：为片区设定关注项门槛覆盖，
+  输入 `miteLoadThreshold`（`0..60`）与 `lowStrengthCeiling`（`1..5`），两者必须同时给出，
+  返回 `source` 为 `override` 的生效门槛；片区无蜂场返回未找到，缺字段或越界返回校验错误。
+- `GET /districts/{district}/concern-thresholds`：读回片区当前生效门槛，
+  未设定覆盖时返回默认门槛并标注 `source` 为 `default`。
 
 错误响应统一为：
 
@@ -70,8 +75,10 @@ go run ./cmd/check -workflow read-apiary-status
 - 已退役蜂箱不再接受巡检与换王。
 - 同一蜂箱任意时刻最多一只 `laying` 蜂王，换王会先关闭旧记录。
 - 蜂王标记色由引入年份个位推导：`1/6` 白、`2/7` 黄、`3/8` 红、`4/9` 绿、`5/0` 蓝。
-- 巡检关注项阈值：螨计数 ≥ 9 记 `mite_load`，子脾为 `none` 记 `brood_gap`，
-  性情为 `aggressive` 记 `temper_risk`，群势 ≤ 2 记 `low_strength`。
+- 巡检关注项阈值：螨计数 ≥ 生效门槛（默认 9）记 `mite_load`，子脾为 `none` 记
+  `brood_gap`，性情为 `aggressive` 记 `temper_risk`，群势 ≤ 生效上限（默认 2）记
+  `low_strength`。协调人可按片区整体覆盖两个数值门槛；覆盖只影响之后提交的巡检，
+  已保存巡检及其关注项原样保留，状态汇总与巡检读取呈现同一份固化关注项。
 - 待巡检：从未巡检，或距 `asOf` 超过 14 天。
 
 ## 环境变量
@@ -89,6 +96,7 @@ go run ./cmd/check -workflow record-inspection
 go run ./cmd/check -workflow replace-queen
 go run ./cmd/check -workflow advance-hive-state
 go run ./cmd/check -workflow read-apiary-status
+go run ./cmd/check -workflow district-concern-thresholds
 ```
 
 ## 测试边界
