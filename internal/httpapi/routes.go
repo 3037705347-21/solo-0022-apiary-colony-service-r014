@@ -15,5 +15,8 @@ func (s *Server) register() {
 	s.mux.HandleFunc("POST /hives/{hiveId}/queens", s.handleReplaceQueen)
 	s.mux.HandleFunc("GET /hives/{hiveId}/queens", s.handleListQueens)
 
+	s.mux.HandleFunc("PUT /districts/{district}/concern-thresholds", s.handleSetDistrictThresholds)
+	s.mux.HandleFunc("GET /districts/{district}/concern-thresholds", s.handleGetDistrictThresholds)
+
 	s.mux.HandleFunc("/", s.handleNotFound)
 }

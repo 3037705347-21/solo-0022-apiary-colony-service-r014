@@ -35,8 +35,18 @@
 ### 提交巡检（record-inspection）
 
 值守人向 `POST /hives/{hiveId}/inspections` 提交群势、子脾形态、性情、螨计数与备注。
-服务确认蜂箱存在且未退役，再校验各量测范围，保存巡检记录，并按固定阈值派生关注项。
-处于已退役状态的蜂箱返回状态错误，量测越界返回校验错误。
+服务确认蜂箱存在且未退役，再校验各量测范围，保存巡检记录，并按该蜂箱所属片区
+在提交时刻生效的阈值派生关注项并随记录固化。处于已退役状态的蜂箱返回状态错误，
+量测越界返回校验错误。
+
+### 设定片区关注项阈值（set-district-thresholds）
+
+协调人向 `PUT /districts/{district}/concern-thresholds` 提交螨计数门槛与群势下限，
+为整个片区设定关注项阈值覆盖。服务校验两个门槛均已提供且落在各自量测范围内，
+任一缺失或越界都返回校验错误且不写入任何覆盖，不得悄悄退回默认门槛。保存成功后
+可以通过 `GET /districts/{district}/concern-thresholds` 读回同一份覆盖；未设置覆盖的
+片区读取时返回未找到，而不是默认门槛。覆盖只影响保存之后提交的巡检，已经固化的
+巡检关注项在读取与状态汇总中保持原样。
 
 ### 更换蜂王（replace-queen）
 
@@ -81,10 +91,14 @@
 
 ### 关注项派生规则
 
-- `mite_load`：螨计数大于等于 9。
+- `mite_load`：螨计数大于等于生效的螨计数门槛（默认 9）。
 - `brood_gap`：子脾形态为 `none`。
 - `temper_risk`：性情为 `aggressive`。
-- `low_strength`：群势小于等于 2。
+- `low_strength`：群势小于等于生效的群势下限（默认 2）。
+
+片区级覆盖可替换螨计数门槛与群势下限；未覆盖的片区使用默认门槛。关注项在巡检
+提交时按当时生效的阈值派生并随记录固化，之后的阈值调整不回溯已保存的巡检，
+巡检读取与状态汇总呈现的始终是同一份固化结果。
 
 ### 状态汇总规则
 
@@ -112,6 +126,7 @@
 - `POST /apiaries`、`GET /apiaries/{apiaryId}`：录入与读回蜂场。
 - `POST /apiaries/{apiaryId}/hives`、`GET /hives/{hiveId}`：安装与读回蜂箱。
 - `POST /hives/{hiveId}/inspections`、`GET /hives/{hiveId}/inspections`：提交与列出巡检。
+- `PUT /districts/{district}/concern-thresholds`、`GET /districts/{district}/concern-thresholds`：设定与读回片区关注项阈值覆盖。
 - `POST /hives/{hiveId}/queens`：更换蜂王。
 - `POST /hives/{hiveId}/state`：推进蜂群状态。
 - `GET /apiaries/{apiaryId}/status`：读取蜂场状态汇总。

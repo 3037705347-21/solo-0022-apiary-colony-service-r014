@@ -46,8 +46,9 @@ func (s *Service) Record(hiveID string, input RecordInput) (domain.Inspection, e
 	if err != nil {
 		return domain.Inspection{}, err
 	}
-	record.Concerns = DeriveConcerns(record)
-	saved, err := s.store.AddInspection(hiveID, record)
+	saved, err := s.store.AddInspection(hiveID, record, DefaultThresholds(), func(thresholds domain.ConcernThresholds) []string {
+		return DeriveConcerns(record, thresholds)
+	})
 	if err != nil {
 		return domain.Inspection{}, err
 	}
@@ -56,4 +57,35 @@ func (s *Service) Record(hiveID string, input RecordInput) (domain.Inspection, e
 
 func (s *Service) List(hiveID string) ([]domain.Inspection, error) {
 	return s.store.ListInspections(hiveID)
+}
+
+type ThresholdsInput struct {
+	MiteLoadThreshold  int
+	LowStrengthCeiling int
+}
+
+// SetDistrictThresholds 为片区保存关注项阈值覆盖，只影响之后提交的巡检。
+// 片区名或任一门槛非法时返回校验错误，不写入任何覆盖。
+func (s *Service) SetDistrictThresholds(district string, input ThresholdsInput) (domain.ConcernThresholds, error) {
+	trimmed := domain.TrimText(district)
+	if err := domain.ValidateText("district", trimmed, 1, 60); err != nil {
+		return domain.ConcernThresholds{}, err
+	}
+	thresholds, err := domain.NewConcernThresholds(input.MiteLoadThreshold, input.LowStrengthCeiling)
+	if err != nil {
+		return domain.ConcernThresholds{}, err
+	}
+	s.store.SetDistrictThresholds(trimmed, thresholds)
+	return thresholds, nil
+}
+
+// DistrictThresholds 读回片区当前的关注项阈值覆盖；未设置时返回未找到，
+// 避免调用方把默认门槛误当成已生效的覆盖。
+func (s *Service) DistrictThresholds(district string) (domain.ConcernThresholds, error) {
+	trimmed := domain.TrimText(district)
+	thresholds, ok := s.store.DistrictThresholds(trimmed)
+	if !ok {
+		return domain.ConcernThresholds{}, domain.NotFound("片区阈值覆盖", trimmed)
+	}
+	return thresholds, nil
 }

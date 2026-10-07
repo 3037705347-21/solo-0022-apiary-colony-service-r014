@@ -18,16 +18,19 @@ type Memory struct {
 	inspections map[string][]domain.Inspection
 	queens      map[string][]domain.Queen
 
+	districtThresholds map[string]domain.ConcernThresholds
+
 	inspectionSeq int
 	queenSeq      int
 }
 
 func NewMemory() *Memory {
 	return &Memory{
-		apiaries:    make(map[string]domain.Apiary),
-		hives:       make(map[string]domain.Hive),
-		inspections: make(map[string][]domain.Inspection),
-		queens:      make(map[string][]domain.Queen),
+		apiaries:           make(map[string]domain.Apiary),
+		hives:              make(map[string]domain.Hive),
+		inspections:        make(map[string][]domain.Inspection),
+		queens:             make(map[string][]domain.Queen),
+		districtThresholds: make(map[string]domain.ConcernThresholds),
 	}
 }
 
@@ -89,9 +92,15 @@ func (m *Memory) AdvanceHive(hiveID string, target domain.HiveState, _ time.Time
 	return domain.Transition{HiveID: hiveID, From: from, To: target}, nil
 }
 
-// AddInspection 分配巡检编号、写入记录，并推进蜂箱的最近巡检时间。
-// 蜂箱存在与可接受巡检的判定与写入处于同一把锁，避免退役与巡检之间的竞态。
-func (m *Memory) AddInspection(hiveID string, inspection domain.Inspection) (domain.Inspection, error) {
+// AddInspection 分配巡检编号、按提交时刻生效的片区阈值派生关注项并写入记录，
+// 同时推进蜂箱的最近巡检时间。蜂箱校验、阈值解析、关注项派生与写入处于同一把锁，
+// 避免退役、阈值调整与巡检提交之间的竞态；fallback 是片区未覆盖时使用的默认阈值。
+func (m *Memory) AddInspection(
+	hiveID string,
+	inspection domain.Inspection,
+	fallback domain.ConcernThresholds,
+	derive func(domain.ConcernThresholds) []string,
+) (domain.Inspection, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hive, ok := m.hives[hiveID]
@@ -101,6 +110,13 @@ func (m *Memory) AddInspection(hiveID string, inspection domain.Inspection) (dom
 	if !hive.AcceptsInspection() {
 		return domain.Inspection{}, domain.InvalidState("蜂箱 %q 处于 %q 状态，不接受巡检", hiveID, hive.State)
 	}
+	thresholds := fallback
+	if apiary, ok := m.apiaries[hive.ApiaryID]; ok {
+		if override, ok := m.districtThresholds[apiary.District]; ok {
+			thresholds = override
+		}
+	}
+	inspection.Concerns = derive(thresholds)
 	m.inspectionSeq++
 	inspection.ID = fmt.Sprintf("inspection-%06d", m.inspectionSeq)
 	inspection.HiveID = hiveID
@@ -110,6 +126,22 @@ func (m *Memory) AddInspection(hiveID string, inspection domain.Inspection) (dom
 	hive.LastInspectionAt = &observedAt
 	m.hives[hiveID] = hive
 	return inspection, nil
+}
+
+// SetDistrictThresholds 保存片区的关注项阈值覆盖，只影响之后提交的巡检。
+func (m *Memory) SetDistrictThresholds(district string, thresholds domain.ConcernThresholds) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.districtThresholds[district] = thresholds
+}
+
+// DistrictThresholds 返回片区当前的关注项阈值覆盖；未设置时 ok 为 false，
+// 调用方不得把缺省返回值当作已生效的覆盖。
+func (m *Memory) DistrictThresholds(district string) (domain.ConcernThresholds, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	thresholds, ok := m.districtThresholds[district]
+	return thresholds, ok
 }
 
 // AppendQueen 追加一条产卵蜂王记录，并把蜂箱的当前蜂王指针指向它。

@@ -186,6 +186,113 @@ func checkAdvanceHiveState(c *client) error {
 	return nil
 }
 
+func checkSetDistrictThresholds(c *client) error {
+	// 两个片区：north-ridge 将被覆盖，south-slope 保持默认阈值。
+	if err := seedApiary(c, demoApiaryID, "北岭蜂场", "north-ridge", "周岚"); err != nil {
+		return err
+	}
+	if err := seedHive(c, demoApiaryID, demoHiveID, "langstroth"); err != nil {
+		return err
+	}
+	if err := seedApiary(c, "apiary-south", "南坡蜂场", "south-slope", "李澈"); err != nil {
+		return err
+	}
+	if err := seedHive(c, "apiary-south", "hive-02", "warre"); err != nil {
+		return err
+	}
+
+	// 覆盖前：默认阈值下 miteCount=6、colonyStrength=3 不派生任何关注项。
+	if _, err := c.expect("POST", "/hives/hive-01/inspections", map[string]any{
+		"observedAt": "2026-04-10T09:00:00Z", "colonyStrength": 3, "broodPattern": "solid",
+		"temper": "calm", "miteCount": 6, "note": "",
+	}, 201, `"concerns":[]`); err != nil {
+		return err
+	}
+
+	// 覆盖规则缺字段或越界都必须显式失败，且不得留下任何覆盖。
+	if _, err := c.expect("PUT", "/districts/north-ridge/concern-thresholds", map[string]any{
+		"miteLoadThreshold": 5,
+	}, 400, `"code":"invalid_request"`); err != nil {
+		return err
+	}
+	if _, err := c.expect("PUT", "/districts/north-ridge/concern-thresholds", map[string]any{
+		"miteLoadThreshold": 61, "lowStrengthCeiling": 4,
+	}, 400, `"code":"invalid_request"`); err != nil {
+		return err
+	}
+	if _, err := c.expect("PUT", "/districts/north-ridge/concern-thresholds", map[string]any{
+		"miteLoadThreshold": 5, "lowStrengthCeiling": 0,
+	}, 400, `"code":"invalid_request"`); err != nil {
+		return err
+	}
+	if _, err := c.expect("GET", "/districts/north-ridge/concern-thresholds", nil, 404,
+		`"code":"not_found"`); err != nil {
+		return err
+	}
+
+	// 合法覆盖：设定并读回同一份阈值。
+	if _, err := c.expect("PUT", "/districts/north-ridge/concern-thresholds", map[string]any{
+		"miteLoadThreshold": 5, "lowStrengthCeiling": 4,
+	}, 200, `"district":"north-ridge"`, `"miteLoadThreshold":5`, `"lowStrengthCeiling":4`); err != nil {
+		return err
+	}
+	if _, err := c.expect("GET", "/districts/north-ridge/concern-thresholds", nil, 200,
+		`"miteLoadThreshold":5`, `"lowStrengthCeiling":4`); err != nil {
+		return err
+	}
+
+	// 覆盖后提交的巡检按新阈值派生：6>=5 记 mite_load，3<=4 记 low_strength。
+	if _, err := c.expect("POST", "/hives/hive-01/inspections", map[string]any{
+		"observedAt": "2026-04-11T09:00:00Z", "colonyStrength": 3, "broodPattern": "solid",
+		"temper": "calm", "miteCount": 6, "note": "",
+	}, 201, `"concerns":["mite_load","low_strength"]`); err != nil {
+		return err
+	}
+
+	// 未覆盖片区的同量测巡检仍按默认阈值，不派生关注项。
+	if _, err := c.expect("POST", "/hives/hive-02/inspections", map[string]any{
+		"observedAt": "2026-04-11T09:00:00Z", "colonyStrength": 3, "broodPattern": "solid",
+		"temper": "calm", "miteCount": 6, "note": "",
+	}, 201, `"concerns":[]`); err != nil {
+		return err
+	}
+
+	// 已保存的巡检保持原样：列表里覆盖前的那条仍为空关注项，且排在新巡检之前。
+	list, err := c.expect("GET", "/hives/hive-01/inspections", nil, 200,
+		`"concerns":[]`, `"concerns":["mite_load","low_strength"]`)
+	if err != nil {
+		return err
+	}
+	if err := list.mustOrder(`"concerns":[]`, `"concerns":["mite_load","low_strength"]`); err != nil {
+		return err
+	}
+
+	// 状态汇总与巡检记录同源：最近关注项与列表里最新一条完全一致。
+	if _, err := c.expect("GET", "/apiaries/apiary-north/status?asOf=2026-04-12T00:00:00Z", nil, 200,
+		`"concernHives":["hive-01"]`, `"latestConcerns":["mite_load","low_strength"]`); err != nil {
+		return err
+	}
+
+	// 覆盖生效后，越界调整仍显式失败，且不得篡改已生效阈值：
+	// 之后的巡检依旧按 5/4 派生，而不是退回默认门槛或采用非法值。
+	if _, err := c.expect("PUT", "/districts/north-ridge/concern-thresholds", map[string]any{
+		"miteLoadThreshold": 61, "lowStrengthCeiling": 9,
+	}, 400, `"code":"invalid_request"`); err != nil {
+		return err
+	}
+	if _, err := c.expect("GET", "/districts/north-ridge/concern-thresholds", nil, 200,
+		`"miteLoadThreshold":5`, `"lowStrengthCeiling":4`); err != nil {
+		return err
+	}
+	if _, err := c.expect("POST", "/hives/hive-01/inspections", map[string]any{
+		"observedAt": "2026-04-12T09:00:00Z", "colonyStrength": 3, "broodPattern": "solid",
+		"temper": "calm", "miteCount": 6, "note": "",
+	}, 201, `"concerns":["mite_load","low_strength"]`); err != nil {
+		return err
+	}
+	return nil
+}
+
 func checkReadApiaryStatus(c *client) error {
 	if err := seedApiary(c, demoApiaryID, "北岭蜂场", "北岭片区", "周岚"); err != nil {
 		return err
